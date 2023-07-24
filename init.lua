@@ -1,5 +1,20 @@
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
+vim.wo.relativenumber = true
+vim.g.loaded_netrw = 1
+vim.g.loaded_netrwPlugin = 1
+vim.opt.termguicolors = true
+vim.opt.listchars = {
+  eol = 'ඞ',
+  tab = '▸ ',
+  trail = '·',
+  extends = '❯',
+  precedes = '❮',
+}
+vim.opt.list = true
+
+vim.g.copilot_no_tab_map = true
+vim.g.copilot_assume_mapped = true
 
 -- Install package manager
 --    https://github.com/folke/lazy.nvim
@@ -24,14 +39,31 @@ require('lazy').setup({
   'tpope/vim-fugitive',
   'tpope/vim-rhubarb',
 
+  {
+    'nvim-tree/nvim-tree.lua',
+    config = function()
+      require('nvim-tree').setup {
+        actions = { open_file = { quit_on_open = true } }
+      }
+      vim.api.nvim_set_keymap('n', '<leader>nt', ':NvimTreeToggle<CR>', { noremap = true, silent = true })
+    end
+  },
+  'nvim-tree/nvim-web-devicons',
+
   'rvmelkonian/move.vim',
   -- Detect tabstop and shiftwidth automatically
   'tpope/vim-sleuth',
-
+  {
+    'chipsenkbeil/distant.nvim',
+    config = function()
+      require('distant').setup {
+        ['*'] = require('distant.settings').chip_default()
+      }
+    end,
+  },
   {
     'github/copilot.vim',
     config = function()
-      vim.g.copilot_no_tab_map = true
       vim.api.nvim_set_keymap("i", "<C-J>", 'copilot#Accept("<CR>")', { silent = true, expr = true })
     end
   },
@@ -233,6 +265,14 @@ vim.o.termguicolors = true
 
 vim.opt.clipboard = 'unnamedplus'
 
+if vim.g.neovide == true then
+  vim.g.neovide_transparency = 0.75
+  vim.g.neovide_cursor_vfx_mode = 'railgun'
+  vim.g.neovide_fullscreen = true
+  vim.o.guifont = "Source Code Pro:h11"
+  vim.api.nvim_set_keymap('n', '<F11>', ":let g:neovide_fullscreen = !g:neovide_fullscreen<CR>", {})
+end
+
 -- [[ Basic Keymaps ]]
 
 -- Keymaps for better default experience
@@ -253,6 +293,32 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   group = highlight_group,
   pattern = '*',
 })
+
+vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
+  pattern = { "*.css" },
+  command = "setlocal ts=4 sw=4",
+})
+
+-- [[ Replace all occurences of pattern ]
+vim.api.nvim_create_user_command("GSub", function(opts)
+    local args = vim.split(opts.args, " -- ", { plain = true })
+    if #args < 2 then
+      print("expected <pattenr> <replacement>")
+      return
+    end
+    print("Replacing '" .. args[1] .. "' with '" .. args[2] .. "'")
+    local out = vim.fn.system('rg --files-with-matches --no-messages "' .. args[1] .. '"')
+    local files = vim.split(out, "\n", { plain = true })
+    vim.fn.system(
+      'rg --files-with-matches --no-messages "' .. args[1] ..
+      '" | xargs sed -i "s/' .. args[1] .. '/' .. args[2] .. '/g"'
+    )
+    for _, file in ipairs(files) do
+      vim.cmd('e ' .. file)
+    end
+  end,
+  { nargs = '*' }
+)
 
 -- Enable telescope fzf native, if installed
 pcall(require('telescope').load_extension, 'fzf')
@@ -285,7 +351,7 @@ end
 -- See `:help nvim-treesitter`
 require('nvim-treesitter.configs').setup {
   -- Add languages to be installed here that you want installed for treesitter
-  ensure_installed = { 'c', 'cpp', 'go', 'lua', 'python', 'rust', 'tsx', 'typescript', 'help', 'vim' },
+  ensure_installed = { 'c', 'cpp', 'go', 'lua', 'rust', 'tsx', 'typescript', 'help', 'vim', 'proto', 'sql' },
 
   -- Autoinstall languages that are not installed. Defaults to false (but you can change for yourself!)
   auto_install = true,
@@ -405,12 +471,15 @@ end
 --  Add any additional override configuration in the following tables. They will be passed to
 --  the `settings` field of the server config. You must look up that documentation yourself.
 local servers = {
-  -- clangd = {},
+  clangd = {},
   -- gopls = {},
-  -- pyright = {},
+  pyright = {},
   rust_analyzer = {
     settings = {
       ["rust-analyzer"] = {
+        checkOnSave = {
+          command = "clippy",
+        },
         imports = {
           granularity = {
             group = "module",
@@ -428,13 +497,17 @@ local servers = {
       }
     }
   },
-  -- tsserver = {},
+  tsserver = {},
   lua_ls = {
     Lua = {
       workspace = { checkThirdParty = false },
       telemetry = { enable = false },
     },
   },
+}
+
+require('lspconfig').gdscript.setup {
+  on_attach = on_attach,
 }
 
 -- Setup neovim lua configuration
@@ -456,13 +529,25 @@ mason_lspconfig.setup {
 
 mason_lspconfig.setup_handlers {
   function(server_name)
-    require('lspconfig')[server_name].setup {
+    local config = {
       capabilities = capabilities,
       on_attach = on_attach,
       settings = servers[server_name],
     }
+    -- if server_name == 'rust_analyzer' then
+    --   config.root_dir = function(fname, _)
+    --     local current_wd = vim.fn.getcwd()
+    --     if fname:find("^" .. current_wd) == nil and current_wd:find("^" .. fname) == nil then
+    --       return nil
+    --     end
+    --     return require('lspconfig').util.root_pattern("Cargo.toml")(fname)
+    --   end
+    -- end
+
+    require('lspconfig')[server_name].setup(config)
   end,
 }
+
 
 require('lspconfig').move_analyzer.setup {
   capabilities = capabilities,
@@ -502,8 +587,6 @@ cmp.setup {
     ['<S-Tab>'] = cmp.mapping(function(fallback)
       if cmp.visible() then
         cmp.select_prev_item()
-      elseif luasnip.jumpable(-1) then
-        luasnip.jump(-1)
       else
         fallback()
       end
